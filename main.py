@@ -1,4 +1,4 @@
-from flask import Flask, request, redirect, render_template
+from flask import Flask, request, redirect, render_template, session
 from flask_sqlalchemy import SQLAlchemy
 
 
@@ -7,16 +7,37 @@ app.config['DEBUG'] = True
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://blogz:123456@localhost:8889/blogz'
 app.config['SQLALCHEMY_ECHO'] = True
 db = SQLAlchemy(app)
+app.secret_key = "s3cre3tstr1ng" 
 
 class Blog(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(120))
     body = db.Column(db.String(450))
+    owner_id = db.Column(db.Integer, db.ForeignKey("user.id"))
 
-    def __init__(self, title, body):
+    def __init__(self, title, body, owner):
         self.title = title
         self.body = body
+        self.owner = owner
+
+class User(db.Model):
+
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(120))
+    password = db.Column(db.String(12))
+    blogs = db.relationship("Blog", backref="user")
+
+    def __init__(self,username, password):
+        self.username = username
+        self.password = password
+
+@app.before_request
+def require_login():
+    print(request.endpoint)
+    allowed_routes = ['login', 'blogs', 'index', 'signup']
+    if request.endpoint not in allowed_routes and 'user_id' not in session:
+        return redirect('/login')
 
 @app.route('/', methods=['GET'])
 def index():
@@ -47,16 +68,6 @@ def id():
     return render_template('single_blog.html', blog=blog)    
 
 
-class User(db.Model):
-
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(120))
-    password = db.Column(db.String(12))
-
-    def __init__(self,username, password):
-        self.username = username
-        self.password = password
-
 @app.route('/signup', methods = ['GET'])
 def signup_request():
     return render_template('signup.html')
@@ -69,7 +80,7 @@ def signup():
     verify_password= request.form['verify_password']
     user_error= ""
     pass_error= ""
-    
+        
     if username == "":
         user_error = "Enter username"
 
@@ -88,15 +99,42 @@ def signup():
         db.session.add(user_signup)
         db.session.commit()
         
-        return redirect('/')
+        resp = make_response(redirect('/add_blog'))
+        resp.set_cookie('user_id', user_signup.id)
+
+        return resp
 
     else:
         return render_template('signup.html', user_error=user_error, pass_error=pass_error, verify_password=pass_error)
 
 
+@app.route('/login', methods=['GET'])
+def login_request():
+    return render_template('login.html')
+
+@app.route('/login', methods=['POST'])
+def login():
+    username = request.form.get("username")
+    password = request.form.get("password") 
+    user = User.query.filter_by(username=username).first() 
     
 
+    if user is None:
+        return redirect("/signup")
 
-  
+    if password == user.password:
+        session['user_id']=user.id
+ 
+        return redirect('/add_blog')
+    
+    return render_template('login.html', error="verify password")
+
+@app.route('/logout', methods=['GET'])
+def logout():
+    del session['user_id']
+    return redirect('/')
+
+
+   
 if __name__ == "__main__":
     app.run()
